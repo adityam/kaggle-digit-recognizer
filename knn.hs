@@ -1,61 +1,18 @@
-{-# Language FlexibleContexts #-}
-import Text.ParserCombinators.Parsec 
-        ( endBy, sepBy
-        , skipMany, many1
-        , noneOf,  oneOf
-        , char
-        , parse, ParseError
-        , parseFromFile
-        )
-import Text.Parsec (spaces, digit, Stream, ParsecT)
+{-# Language BangPatterns, FlexibleContexts #-}
+import Prelude hiding (read, readFile, writeFile, lines, unlines)
+import Text.Read (read)
+import Data.Text.Lazy    (Text, lines, unlines, pack, unpack)
+import Data.Text.Lazy.IO (readFile, writeFile)
+
 import Text.Printf (printf)
 
-import Data.Char (digitToInt)
-import Data.List (foldl1', sortBy, groupBy, maximumBy)
+import Data.List (sortBy, groupBy, maximumBy)
 import Data.Ord (comparing)
 import Data.Function (on)
 import Data.Word
 
-import Control.Applicative (liftA2)
-
 import Data.Vector (Vector)
 import qualified Data.Vector as Vec (toList, fromList, foldl1', zipWith)
-
------------------------------------------------------------------------------
--- PARSE DATA
------------------------------------------------------------------------------
--- Simple parser from http://book.realworldhaskell.org/read/using-parsec.html
--- This assumes that each line is a string of int separated by comma.
--- Does not accept spaces between digit and comma
-csv = do { firstLine; endBy line eol }
-    where 
-          -- Ignore the first line
-          firstLine = skipMany (noneOf "\n")
-
-          eol  = many1 (oneOf "\r\n")
-
-          line :: Stream s m Char => ParsecT s u m [Word8]
-          line = sepBy digits (char ',')
-
-          -- Digit parser from http://stackoverflow.com/a/10726784/193149
-          digits :: Stream s m Char => ParsecT s u m Word8
-          digits = digitWithSpace
-
-          digitWithSpace :: Stream s m Char => ParsecT s u m Word8
-          digitWithSpace = do
-                              spaces
-                              s <- many1 digit
-                              let d = strToInt s
-                              return d
-
-          strToInt :: String -> Word8
-          strToInt = foldl1' (\a i -> a*10 + i) .  map (fromIntegral . digitToInt)
-
-parseCSV :: String -> Either ParseError [[Word8]]
-parseCSV = parse csv "(unknown)" 
-
-parseCSVFromFile :: String -> IO (Either ParseError [[Word8]])
-parseCSVFromFile = parseFromFile csv
 
 -----------------------------------------------------------------------------
 -- GENERATE RECORDS FROM DATA
@@ -104,35 +61,32 @@ mkLabeledRecord (x:xs) = Record (Label (Just x)) (FeatureVector (Vec.fromList xs
 mkUnlabeledRecord :: [Word8] -> Record
 mkUnlabeledRecord xs = Record (Label Nothing) (FeatureVector (Vec.fromList xs))
 
-train :: [[Word8]] -> [Record]
-train d = records 
-    where records :: [Record]
-          records = map mkLabeledRecord d
-
-classify :: [Record] -> [[Word8]] -> [(Record, Int)]
-classify labeled d = map (classifyRecord labeled) records
-    where records :: [Record]
-          records = map mkUnlabeledRecord d
-
-classifyRecord :: [Record] -> Record -> (Record, Int)
-classifyRecord labeled point = majority -- label (fst majority)
+classify :: [Record] -> Record -> Label
+classify !trained !point = label (fst majority)
     where 
           majority = maximumBy (comparing snd) histogram
 
           histogram :: [(Record, Int)]
           histogram = [ (head xs, length xs) | xs <- groupBy ( (==) `on` label) (sortBy (comparing label) neighbors) ]
           neighbors :: [Record] 
-          neighbors = let dist = comparing (distance point) in take k (sortBy dist  labeled) 
+          neighbors = let dist = comparing (distance point) in take k (sortBy dist  trained) 
           -- Number of nearest neighbors
-          k = 10 :: Int
+          k = 100 :: Int
 
 main :: IO ()
-main = do
+main = let readLine :: Text -> [Word8]
+           readLine s = read ('[' : unpack s ++ "]")
+       in
+       do
        -- Load training sequence
-       input <- parseCSVFromFile "data/train-sample.csv"
-       let trainedData  = fmap train input
-       -- This has to be done in a lazy manner
-       input <- parseCSVFromFile "data/sample.csv"
-       let testData = liftA2 classify trainedData input
-       print testData
+       trainingInput <- readFile "data/train.csv"
+       let trainingData = map (mkLabeledRecord . readLine) (drop 1 $ lines trainingInput)
+       printf "Trainied using %d samples\n" (length trainingData)
 
+       let classifier = classify trainingData
+
+       testingInput <- readFile "data/sample.csv"
+       let testingData = map (mkUnlabeledRecord . readLine) (drop 1 $ lines testingInput)
+       let labels      = map classifier testingData
+       let output      = map (pack.show) labels
+       writeFile "out.csv" (unlines output)
