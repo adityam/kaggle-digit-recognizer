@@ -1,39 +1,50 @@
 {-# Language OverloadedStrings, BangPatterns, FlexibleContexts #-}
-import Prelude hiding (readFile, writeFile, lines, unlines)
-import System.IO (hPrint, openFile, IOMode(..), hSetBuffering, BufferMode(..), hClose)
 
+-- K-nearest neighbors based solution for
+-- http://www.kaggle.com/c/digit-recognizer
+--
+-- Author: Aditya Mahajan 
+
+-- Use Lazy IO instead of default IO.
+import Prelude hiding (readFile, writeFile, lines, unlines)
 import Data.Text.Lazy    (Text, lines)
 import Data.Text.Lazy.IO (readFile)
 
+-- File IO
+import System.IO (hPrint, openFile, IOMode(..), hSetBuffering, BufferMode(..), hClose)
+
+-- Parser for reading CSV files
 import Data.Attoparsec.Text.Lazy (Parser, char, decimal, sepBy1, (<?>), parse, maybeResult)
 
 import Text.Printf (printf)
 
+-- Useful generic functions
 import Data.List (sortBy, groupBy, maximumBy)
 import Data.Ord (comparing)
 import Data.Function (on)
-import Data.Word (Word8)
 import Data.Maybe (fromJust)
+
+-- Data structures for storing data
+import Data.Word (Word8)
 
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as Vec (foldl1', zipWith, fromList, toList)
 
------------------------------------------------------------------------------
--- PARSE CSV FILE ----
-
 record :: Parser [Word8]
 record = decimal `sepBy1` char ',' <?> "record"
-
------------------------------------------------------------------------------
-
------------------------------------------------------------------------------
--- GENERATE RECORDS FROM DATA
------------------------------------------------------------------------------
 
 newtype Label         =  Label (Maybe Word8)
             deriving (Eq, Ord)
 
 newtype FeatureVector =  FeatureVector (Vector Word8)
+
+data Record = Record !Label !FeatureVector
+
+mkLabeledRecord :: [Word8] -> Record
+mkLabeledRecord (x:xs) = Record (Label (Just x)) (FeatureVector (Vec.fromList xs))
+
+mkUnlabeledRecord :: [Word8] -> Record
+mkUnlabeledRecord xs   = Record (Label Nothing)  (FeatureVector (Vec.fromList xs))
 
 instance Show Label where
    show (Label l) = case l of 
@@ -50,26 +61,18 @@ instance Show FeatureVector where
               flatten :: [[Word8]] -> String
               flatten = concatMap (\a -> concatMap show a ++ "\n") 
 
-data Record = Record !Label !FeatureVector
-
-label :: Record -> Label
-label (Record l _) = l 
-
 instance Show Record where
     show (Record l fv) = 
         printf "Label: %s\n%s\n" (show l) (show fv)
+
+label :: Record -> Label
+label (Record l _) = l 
 
 -- Eucledian distance is not a good metric for distance between images
 -- Use IMED distance instead
 distance :: Record -> Record -> Double
 distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.foldl1' (+) diff 
     where diff = Vec.zipWith (\x y -> let d = fromIntegral (x-y) in d*d) xs ys
-
-mkLabeledRecord :: [Word8] -> Record
-mkLabeledRecord (x:xs) = Record (Label (Just x)) (FeatureVector (Vec.fromList xs))
-
-mkUnlabeledRecord :: [Word8] -> Record
-mkUnlabeledRecord xs = Record (Label Nothing) (FeatureVector (Vec.fromList xs))
 
 classify :: [Record] -> Record -> Label
 classify !model !point = label (fst majority)
