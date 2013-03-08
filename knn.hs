@@ -14,6 +14,7 @@ import Data.Char (digitToInt)
 import Data.List (foldl1', sortBy, groupBy, maximumBy)
 import Data.Ord (comparing)
 import Data.Function (on)
+import Data.Word
 
 import Control.Applicative (liftA2)
 
@@ -33,37 +34,37 @@ csv = do { firstLine; endBy line eol }
 
           eol  = many1 (oneOf "\r\n")
 
-          line :: Stream s m Char => ParsecT s u m [Int]
+          line :: Stream s m Char => ParsecT s u m [Word8]
           line = sepBy digits (char ',')
 
           -- Digit parser from http://stackoverflow.com/a/10726784/193149
-          digits :: Stream s m Char => ParsecT s u m Int
+          digits :: Stream s m Char => ParsecT s u m Word8
           digits = digitWithSpace
 
-          digitWithSpace :: Stream s m Char => ParsecT s u m Int
+          digitWithSpace :: Stream s m Char => ParsecT s u m Word8
           digitWithSpace = do
                               spaces
                               s <- many1 digit
                               let d = strToInt s
                               return d
 
-          strToInt :: String -> Int
-          strToInt = foldl1' (\a i -> a*10 + i) .  map digitToInt 
+          strToInt :: String -> Word8
+          strToInt = foldl1' (\a i -> a*10 + i) .  map (fromIntegral . digitToInt)
 
-parseCSV :: String -> Either ParseError [[Int]]
+parseCSV :: String -> Either ParseError [[Word8]]
 parseCSV = parse csv "(unknown)" 
 
-parseCSVFromFile :: String -> IO (Either ParseError [[Int]])
+parseCSVFromFile :: String -> IO (Either ParseError [[Word8]])
 parseCSVFromFile = parseFromFile csv
 
 -----------------------------------------------------------------------------
 -- GENERATE RECORDS FROM DATA
 -----------------------------------------------------------------------------
 
-newtype Label         =  Label (Maybe Int)
+newtype Label         =  Label (Maybe Word8)
             deriving (Eq, Ord)
 
-newtype FeatureVector =  FeatureVector (Vector Int)
+newtype FeatureVector =  FeatureVector (Vector Word8)
             deriving (Eq)
 
 instance Show Label where
@@ -78,7 +79,7 @@ instance Show FeatureVector where
                         
               normalize = map (map (\a -> if a > 128 then 1 else 0))
 
-              flatten :: [[Int]] -> String
+              flatten :: [[Word8]] -> String
               flatten = concatMap (\a -> concatMap show a ++ "\n") 
 
 data Record = Record !Label !FeatureVector
@@ -97,18 +98,18 @@ distance :: Record -> Record -> Double
 distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.foldl1' (+) diff 
     where diff = Vec.zipWith (\x y -> fromIntegral (x-y)^2) xs ys
 
-mkLabeledRecord :: [Int] -> Record
+mkLabeledRecord :: [Word8] -> Record
 mkLabeledRecord (x:xs) = Record (Label (Just x)) (FeatureVector (Vec.fromList xs))
 
-mkUnlabeledRecord :: [Int] -> Record
+mkUnlabeledRecord :: [Word8] -> Record
 mkUnlabeledRecord xs = Record (Label Nothing) (FeatureVector (Vec.fromList xs))
 
-train :: [[Int]] -> [Record]
+train :: [[Word8]] -> [Record]
 train d = records 
     where records :: [Record]
           records = map mkLabeledRecord d
 
-classify :: [Record] -> [[Int]] -> [(Record, Int)]
+classify :: [Record] -> [[Word8]] -> [(Record, Int)]
 classify labeled d = map (classifyRecord labeled) records
     where records :: [Record]
           records = map mkUnlabeledRecord d
@@ -128,10 +129,10 @@ classifyRecord labeled point = majority -- label (fst majority)
 main :: IO ()
 main = do
        -- Load training sequence
-       input <- parseCSVFromFile "train-sample.csv"
-       let trainedData  = fmap train input 
+       input <- parseCSVFromFile "data/train-sample.csv"
+       let trainedData  = fmap train input
        -- This has to be done in a lazy manner
-       input <- parseCSVFromFile "sample.csv"
+       input <- parseCSVFromFile "data/sample.csv"
        let testData = liftA2 classify trainedData input
        print testData
 
