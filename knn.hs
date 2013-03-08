@@ -1,18 +1,37 @@
-{-# Language BangPatterns, FlexibleContexts #-}
+{-# Language OverloadedStrings, BangPatterns, FlexibleContexts #-}
 import Prelude hiding (read, readFile, writeFile, lines, unlines)
 import Text.Read (read)
+
 import Data.Text.Lazy    (Text, lines, unlines, pack, unpack)
 import Data.Text.Lazy.IO (readFile, writeFile)
+
+import Control.Monad (void)
+import Control.Applicative ((<$>), (<|>), (<*>), (<*), (*>), many)
+
+import Data.Attoparsec.Text.Lazy (Parser, Result, char, decimal, sepBy1, (<?>), parse, maybeResult)
 
 import Text.Printf (printf)
 
 import Data.List (sortBy, groupBy, maximumBy)
+import Data.List.Split (splitOn)
 import Data.Ord (comparing)
 import Data.Function (on)
-import Data.Word
+import Data.Word (Word8)
+import Data.Maybe (fromJust)
 
 import Data.Vector (Vector)
-import qualified Data.Vector as Vec (toList, fromList, foldl1', zipWith)
+import qualified Data.Vector as Vec (foldl1', zipWith, fromList, toList)
+
+-----------------------------------------------------------------------------
+-- PARSE CSV FILE ----
+
+field :: Parser Word8
+field = decimal
+
+record :: Parser [Word8]
+record = field `sepBy1` char ',' <?> "record"
+
+-----------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------
 -- GENERATE RECORDS FROM DATA
@@ -30,7 +49,7 @@ instance Show Label where
         Nothing -> "-"
 
 instance Show FeatureVector where
-    show (FeatureVector vec) = flatten . normalize . grid . Vec.toList $ vec
+    show (FeatureVector vec) = flatten . normalize . grid $ Vec.toList vec
         where grid [] = []
               grid y = let (a,as) = splitAt 28 y in a:grid as
                         
@@ -53,7 +72,7 @@ instance Show Record where
 -- Use IMED distance instead
 distance :: Record -> Record -> Double
 distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.foldl1' (+) diff 
-    where diff = Vec.zipWith (\x y -> fromIntegral (x-y)^2) xs ys
+    where diff = Vec.zipWith (\x y -> let d = fromIntegral (x-y) in d*d) xs ys
 
 mkLabeledRecord :: [Word8] -> Record
 mkLabeledRecord (x:xs) = Record (Label (Just x)) (FeatureVector (Vec.fromList xs))
@@ -75,12 +94,12 @@ classify !trained !point = label (fst majority)
 
 main :: IO ()
 main = let readLine :: Text -> [Word8]
-           readLine s = read ('[' : unpack s ++ "]")
+           readLine = fromJust . maybeResult . parse record
        in
        do
        -- Load training sequence
-       trainingInput <- readFile "data/train.csv"
-       let trainingData = map (mkLabeledRecord . readLine) (drop 1 $ lines trainingInput)
+       trainingInput <- fmap lines (readFile "data/train-sample.csv")
+       let trainingData = map (mkLabeledRecord . readLine) (drop 1 trainingInput)
        printf "Trainied using %d samples\n" (length trainingData)
 
        let classifier = classify trainingData
@@ -89,4 +108,4 @@ main = let readLine :: Text -> [Word8]
        let testingData = map (mkUnlabeledRecord . readLine) (drop 1 $ lines testingInput)
        let labels      = map classifier testingData
        let output      = map (pack.show) labels
-       writeFile "out.csv" (unlines output)
+       sequence_ [ print l | l <- labels ]
