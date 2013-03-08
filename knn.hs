@@ -1,4 +1,4 @@
-{-# Language BangPatterns, FlexibleContexts #-}
+{-# Language FlexibleContexts #-}
 import Text.ParserCombinators.Parsec 
         ( endBy, sepBy
         , skipMany, many1
@@ -11,13 +11,14 @@ import Text.Parsec (spaces, digit, Stream, ParsecT)
 import Text.Printf (printf)
 
 import Data.Char (digitToInt)
-import Data.List (foldl1')
+import Data.List (foldl1', sortBy, groupBy, maximumBy)
+import Data.Ord (comparing)
+import Data.Function (on)
 
-import Data.Vector (Vector, (!))
+import Control.Applicative (liftA2)
+
+import Data.Vector (Vector)
 import qualified Data.Vector as Vec (toList, fromList, foldl1', zipWith)
-
-import Data.Trees.KdTree (KdTree, Point(..))
-import qualified Data.Trees.KdTree as NN (fromList, kNearestNeighbors)
 
 -----------------------------------------------------------------------------
 -- PARSE DATA
@@ -47,7 +48,7 @@ csv = do { firstLine; endBy line eol }
                               return d
 
           strToInt :: String -> Int
-          strToInt = foldl1 (\a i -> a*10 + i) .  map digitToInt 
+          strToInt = foldl1' (\a i -> a*10 + i) .  map digitToInt 
 
 parseCSV :: String -> Either ParseError [[Int]]
 parseCSV = parse csv "(unknown)" 
@@ -59,17 +60,19 @@ parseCSVFromFile = parseFromFile csv
 -- GENERATE RECORDS FROM DATA
 -----------------------------------------------------------------------------
 
-data Record = Record { labelData :: Maybe Int,
-                       rawData   :: Vector Int }
-              deriving Eq
+newtype Label         =  Label (Maybe Int)
+            deriving (Eq, Ord)
 
-instance Show Record where
-    show (Record l xs) = 
-        let label = case l of 
-              Just d  -> show d
-              Nothing -> "-"
-        in 
-        printf "Label: %s\n%s\n" label ( flatten . normalize . grid $ Vec.toList xs)
+newtype FeatureVector =  FeatureVector (Vector Int)
+            deriving (Eq)
+
+instance Show Label where
+   show (Label l) = case l of 
+        Just d  -> show d
+        Nothing -> "-"
+
+instance Show FeatureVector where
+    show (FeatureVector vec) = flatten . normalize . grid . Vec.toList $ vec
         where grid [] = []
               grid y = let (a,as) = splitAt 28 y in a:grid as
                         
@@ -77,35 +80,58 @@ instance Show Record where
 
               flatten :: [[Int]] -> String
               flatten = concatMap (\a -> concatMap show a ++ "\n") 
-          
-instance Point Record where
-    dimension _ = 784 -- 28*28
-    coord i (Record _ xs)   = fromIntegral (xs!i)
-    dist2 (Record _ xs) (Record _ ys) = Vec.foldl1' (+) diff 
-            where diff = Vec.zipWith (\x y -> fromIntegral (x-y)^2) xs ys
+
+data Record = Record !Label !FeatureVector
+            deriving (Eq)
+
+label :: Record -> Label
+label (Record l _) = l 
+
+instance Show Record where
+    show (Record l fv) = 
+        printf "Label: %s\n%s\n" (show l) (show fv)
+
+-- Eucledian distance is not a good metric for distance between images
+-- Use IMED distance instead
+distance :: Record -> Record -> Double
+distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.foldl1' (+) diff 
+    where diff = Vec.zipWith (\x y -> fromIntegral (x-y)^2) xs ys
 
 mkLabeledRecord :: [Int] -> Record
-mkLabeledRecord (x:xs) = Record (Just x) (Vec.fromList xs)
+mkLabeledRecord (x:xs) = Record (Label (Just x)) (FeatureVector (Vec.fromList xs))
 
 mkUnlabeledRecord :: [Int] -> Record
-mkUnlabeledRecord xs = Record Nothing (Vec.fromList xs)
+mkUnlabeledRecord xs = Record (Label Nothing) (FeatureVector (Vec.fromList xs))
 
-train :: [[Int]] -> KdTree Record
-train d = NN.fromList records 
+train :: [[Int]] -> [Record]
+train d = records 
     where records :: [Record]
           records = map mkLabeledRecord d
 
-classify tree d = map (classifyRecord tree) records
+classify :: [Record] -> [[Int]] -> [(Record, Int)]
+classify labeled d = map (classifyRecord labeled) records
     where records :: [Record]
           records = map mkUnlabeledRecord d
 
-classifyRecord tree d = fmap (\t -> NN.kNearestNeighbors t 10 d) tree
+classifyRecord :: [Record] -> Record -> (Record, Int)
+classifyRecord labeled point = majority -- label (fst majority)
+    where 
+          majority = maximumBy (comparing snd) histogram
 
+          histogram :: [(Record, Int)]
+          histogram = [ (head xs, length xs) | xs <- groupBy ( (==) `on` label) (sortBy (comparing label) neighbors) ]
+          neighbors :: [Record] 
+          neighbors = let dist = comparing (distance point) in take k (sortBy dist  labeled) 
+          -- Number of nearest neighbors
+          k = 10 :: Int
+
+main :: IO ()
 main = do
        -- Load training sequence
        input <- parseCSVFromFile "train-sample.csv"
        let trainedData  = fmap train input 
+       -- This has to be done in a lazy manner
        input <- parseCSVFromFile "sample.csv"
-       let testData = fmap (classify trainedData) input
+       let testData = liftA2 classify trainedData input
        print testData
 
