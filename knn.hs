@@ -1,35 +1,28 @@
 {-# Language OverloadedStrings, BangPatterns, FlexibleContexts #-}
-import Prelude hiding (read, readFile, writeFile, lines, unlines)
-import Text.Read (read)
+import Prelude hiding (readFile, writeFile, lines, unlines)
+import System.IO (hPrint, openFile, IOMode(..), hSetBuffering, BufferMode(..), hClose)
 
-import Data.Text.Lazy    (Text, lines, unlines, pack, unpack)
-import Data.Text.Lazy.IO (readFile, writeFile)
+import Data.Text.Lazy    (Text, lines)
+import Data.Text.Lazy.IO (readFile)
 
-import Control.Monad (void)
-import Control.Applicative ((<$>), (<|>), (<*>), (<*), (*>), many)
-
-import Data.Attoparsec.Text.Lazy (Parser, Result, char, decimal, sepBy1, (<?>), parse, maybeResult)
+import Data.Attoparsec.Text.Lazy (Parser, char, decimal, sepBy1, (<?>), parse, maybeResult)
 
 import Text.Printf (printf)
 
 import Data.List (sortBy, groupBy, maximumBy)
-import Data.List.Split (splitOn)
 import Data.Ord (comparing)
 import Data.Function (on)
 import Data.Word (Word8)
 import Data.Maybe (fromJust)
 
-import Data.Vector (Vector)
-import qualified Data.Vector as Vec (foldl1', zipWith, fromList, toList)
+import Data.Vector.Unboxed (Vector)
+import qualified Data.Vector.Unboxed as Vec (foldl1', zipWith, fromList, toList)
 
 -----------------------------------------------------------------------------
 -- PARSE CSV FILE ----
 
-field :: Parser Word8
-field = decimal
-
 record :: Parser [Word8]
-record = field `sepBy1` char ',' <?> "record"
+record = decimal `sepBy1` char ',' <?> "record"
 
 -----------------------------------------------------------------------------
 
@@ -41,7 +34,6 @@ newtype Label         =  Label (Maybe Word8)
             deriving (Eq, Ord)
 
 newtype FeatureVector =  FeatureVector (Vector Word8)
-            deriving (Eq)
 
 instance Show Label where
    show (Label l) = case l of 
@@ -59,7 +51,6 @@ instance Show FeatureVector where
               flatten = concatMap (\a -> concatMap show a ++ "\n") 
 
 data Record = Record !Label !FeatureVector
-            deriving (Eq)
 
 label :: Record -> Label
 label (Record l _) = l 
@@ -81,31 +72,45 @@ mkUnlabeledRecord :: [Word8] -> Record
 mkUnlabeledRecord xs = Record (Label Nothing) (FeatureVector (Vec.fromList xs))
 
 classify :: [Record] -> Record -> Label
-classify !trained !point = label (fst majority)
+classify !model !point = label (fst majority)
     where 
           majority = maximumBy (comparing snd) histogram
 
           histogram :: [(Record, Int)]
-          histogram = [ (head xs, length xs) | xs <- groupBy ( (==) `on` label) (sortBy (comparing label) neighbors) ]
+          histogram = [ (head xs, length xs) 
+                      | xs <- groupBy ( (==) `on` label) (sortBy (comparing label) neighbors) ]
+
           neighbors :: [Record] 
-          neighbors = let dist = comparing (distance point) in take k (sortBy dist  trained) 
+          neighbors = let dist = comparing (distance point) in take k (sortBy dist  model) 
           -- Number of nearest neighbors
           k = 100 :: Int
 
 main :: IO ()
 main = let readLine :: Text -> [Word8]
            readLine = fromJust . maybeResult . parse record
+
+           parseFile :: String -> IO [Text]
+           parseFile = fmap (tail . lines) . readFile
        in
        do
-       -- Load training sequence
-       trainingInput <- fmap lines (readFile "data/train-sample.csv")
-       let trainingData = map (mkLabeledRecord . readLine) (drop 1 trainingInput)
-       printf "Trainied using %d samples\n" (length trainingData)
+       -- Load training sequences
+       trainingInput <- parseFile "data/train-sample.csv"
+       let trainingData = map (mkLabeledRecord . readLine) trainingInput
 
+       -- Load testing sequences
+       testingInput <- parseFile "data/sample.csv"
+       let testingData = map (mkUnlabeledRecord . readLine) testingInput
+
+       -- Classify
        let classifier = classify trainingData
+           labels      = map classifier testingData
 
-       testingInput <- readFile "data/sample.csv"
-       let testingData = map (mkUnlabeledRecord . readLine) (drop 1 $ lines testingInput)
-       let labels      = map classifier testingData
-       let output      = map (pack.show) labels
-       sequence_ [ print l | l <- labels ]
+       -- Output result
+       printf "Trainied using %d samples\n" (length trainingData)
+       out <- openFile "data/output-sample.csv" WriteMode     
+
+       -- Flush when the output has 100 bytes
+       hSetBuffering out (BlockBuffering (Just 100))
+
+       sequence_ [ hPrint out l | l <- labels ]
+       hClose out
