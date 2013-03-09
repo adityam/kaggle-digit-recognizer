@@ -32,8 +32,8 @@ import Control.Parallel.Strategies
 -- Data structures for storing data
 import Data.Word (Word8)
 
-import Data.Vector.Unboxed (Vector)
-import qualified Data.Vector.Unboxed as Vec (sum, zipWith, fromList, toList)
+import Data.Vector.Storable (Vector)
+import qualified Data.Vector.Storable as Vec (sum, zipWith, fromList, toList)
 
 record :: Parser [Word8]
 record = decimal `sepBy1` char ',' <?> "record"
@@ -120,7 +120,7 @@ main = let readLine :: ByteString -> [Word8]
        let trainingData = map (mkLabeledRecord . readLine) trainingInput
 
        -- Load testing sequences
-       testingInput <- parseFile "data/test.csv"
+       testingInput <- parseFile "data/sample.csv"
        let testingData = map (mkUnlabeledRecord . readLine) testingInput
 
        -- Classify
