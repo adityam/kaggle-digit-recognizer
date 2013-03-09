@@ -19,10 +19,11 @@ import Data.Attoparsec.Text.Lazy (Parser, char, decimal, sepBy1, (<?>), parse, m
 import Text.Printf (printf)
 
 -- Useful generic functions
-import Data.List (sortBy, groupBy, maximumBy)
+import Data.List (sortBy, sort, groupBy, maximumBy)
 import Data.Ord (comparing)
 import Data.Function (on)
 import Data.Maybe (fromJust)
+import Control.Arrow ( (&&&) )
 
 -- Data structures for storing data
 import Data.Word (Word8)
@@ -75,16 +76,24 @@ distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.foldl
     where diff = Vec.zipWith (\x y -> let d = fromIntegral (x-y) in d*d) xs ys
 
 classify :: [Record] -> Record -> Label
-classify !model !point = label (fst majority)
+classify !model !point = (fst majority)
     where 
           majority = maximumBy (comparing snd) histogram
 
-          histogram :: [(Record, Int)]
-          histogram = [ (head xs, length xs) 
-                      | xs <- groupBy ( (==) `on` label) (sortBy (comparing label) neighbors) ]
+          histogram :: [(Label, Int)]
+          histogram = [ (fst (head xs), length xs) 
+                      | xs <- groupBy ( (==) `on` fst) (sortBy (comparing fst) neighbors) ]
 
-          neighbors :: [Record] 
-          neighbors = let dist = comparing (distance point) in take k (sortBy dist  model) 
+          -- The naive implementation is slow, possibly because dist is being
+          -- called O(n*lon(n)) times rather than O(n) times.
+          -- neighbors :: [Record] 
+          -- neighbors = let dist = comparing (distance point) in take k (sortBy dist  model) 
+          dist      :: [(Label, Double)]
+          dist      = map (label &&& distance point) model
+
+          neighbors :: [(Label, Double)]
+          neighbors = take k (sortBy (comparing snd) dist)
+          
           -- Number of nearest neighbors
           k = 100 :: Int
 
