@@ -29,7 +29,7 @@ streaming manner.
 To parse each line of the file into digits, I use a lazy Attoparsec parser.
 
 > import Data.Attoparsec.ByteString.Lazy  (parse, maybeResult)
-> import Data.Attoparsec.ByteString.Char8 (char, decimal)
+> import Data.Attoparsec.ByteString.Char8 (decimal)
 
 By default, the Attoparsec parser results its own data structure. To simply the
 code, I assume that the file is always in the correct format (so that parsing is
@@ -38,13 +38,7 @@ always done correctly). So, I parse using:
     fromJust . maybeResult . parse
 
 > import Data.Maybe (fromJust)
-> import Control.Arrow ( (&&&) )
 > import Data.List (foldl')
-
-For fast fusion of data, I use the `Vector` data structure
-
-> import Data.Vector.Unboxed (Vector)
-> import qualified Data.Vector.Unboxed as Vec (sum, zipWith, fromList, length)
 
 The usage of this program is:
 
