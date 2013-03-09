@@ -8,14 +8,15 @@
 
 -- Use Lazy IO instead of default IO.
 import Prelude hiding (readFile, writeFile, lines, unlines)
-import Data.Text.Lazy    (Text, lines)
-import Data.Text.Lazy.IO (readFile)
+import Data.ByteString.Lazy (ByteString, readFile)
+import Data.ByteString.Lazy.Char8 (lines)
 
 -- File IO
 import System.IO (hPrint, openFile, IOMode(..), hSetBuffering, BufferMode(..), hClose)
 
 -- Parser for reading CSV files
-import Data.Attoparsec.Text.Lazy (Parser, char, decimal, sepBy1, (<?>), parse, maybeResult)
+import Data.Attoparsec.ByteString.Lazy (Parser, sepBy1, (<?>), parse, maybeResult)
+import Data.Attoparsec.ByteString.Char8 (char, decimal) 
 
 import Text.Printf (printf)
 
@@ -32,7 +33,7 @@ import Control.Parallel.Strategies
 import Data.Word (Word8)
 
 import Data.Vector.Unboxed (Vector)
-import qualified Data.Vector.Unboxed as Vec (foldl1', zipWith, fromList, toList)
+import qualified Data.Vector.Unboxed as Vec (sum, zipWith, fromList, toList)
 
 record :: Parser [Word8]
 record = decimal `sepBy1` char ',' <?> "record"
@@ -73,10 +74,16 @@ label :: Record -> Label
 label (Record l _) = l 
 
 -- Eucledian distance is not a good metric for distance between images
--- Use IMED distance instead
+-- Use IMED distance instead, which uses a Gaussian weight matrix.
+--
+-- If we are using Eucledian distance, then x^T Q x can be computed efficiently
+-- by first factorizing Q as A^T A. Then we can simply do a coordinate transform
+-- x -> Ax and do the usual Eucledian distance calculations.
 distance :: Record -> Record -> Double
-distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.foldl1' (+) diff 
+distance (Record _ (FeatureVector xs)) (Record _ (FeatureVector ys)) = Vec.sum diff 
     where diff = Vec.zipWith (\x y -> let d = fromIntegral (x-y) in d*d) xs ys
+
+{-# INLINE distance #-}
 
 classify :: [Record] -> Record -> Label
 classify !model !point = (fst majority)
@@ -98,13 +105,13 @@ classify !model !point = (fst majority)
           neighbors = take k ( (sortBy (comparing snd) dist) `using` parListChunk 1000 rdeepseq)
           
           -- Number of nearest neighbors
-          k = 100 :: Int
+          k = 10 :: Int
 
 main :: IO ()
-main = let readLine :: Text -> [Word8]
+main = let readLine :: ByteString -> [Word8]
            readLine = fromJust . maybeResult . parse record
 
-           parseFile :: String -> IO [Text]
+           parseFile :: String -> IO [ByteString]
            parseFile = fmap (tail . lines) . readFile
        in
        do
@@ -113,7 +120,7 @@ main = let readLine :: Text -> [Word8]
        let trainingData = map (mkLabeledRecord . readLine) trainingInput
 
        -- Load testing sequences
-       testingInput <- parseFile "data/test.csv"
+       testingInput <- parseFile "data/sample.csv"
        let testingData = map (mkUnlabeledRecord . readLine) testingInput
 
        -- Classify
