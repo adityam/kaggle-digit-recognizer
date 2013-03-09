@@ -1,4 +1,5 @@
 {-# Language OverloadedStrings, BangPatterns, FlexibleContexts #-}
+{-# Language GeneralizedNewtypeDeriving #-}
 
 -- K-nearest neighbors based solution for
 -- http://www.kaggle.com/c/digit-recognizer
@@ -19,11 +20,13 @@ import Data.Attoparsec.Text.Lazy (Parser, char, decimal, sepBy1, (<?>), parse, m
 import Text.Printf (printf)
 
 -- Useful generic functions
-import Data.List (sortBy, sort, groupBy, maximumBy)
+import Data.List (sortBy, groupBy, maximumBy)
 import Data.Ord (comparing)
 import Data.Function (on)
 import Data.Maybe (fromJust)
 import Control.Arrow ( (&&&) )
+
+import Control.Parallel.Strategies
 
 -- Data structures for storing data
 import Data.Word (Word8)
@@ -35,7 +38,7 @@ record :: Parser [Word8]
 record = decimal `sepBy1` char ',' <?> "record"
 
 newtype Label         =  Label (Maybe Word8)
-            deriving (Eq, Ord)
+            deriving (Eq, Ord, NFData)
 
 newtype FeatureVector =  FeatureVector (Vector Word8)
 
@@ -89,10 +92,10 @@ classify !model !point = (fst majority)
           -- neighbors :: [Record] 
           -- neighbors = let dist = comparing (distance point) in take k (sortBy dist  model) 
           dist      :: [(Label, Double)]
-          dist      = map (label &&& distance point) model
+          dist      =  map (label &&& distance point) model `using` parListChunk 1000 rdeepseq
 
           neighbors :: [(Label, Double)]
-          neighbors = take k (sortBy (comparing snd) dist)
+          neighbors = take k ( (sortBy (comparing snd) dist) `using` parListChunk 1000 rdeepseq)
           
           -- Number of nearest neighbors
           k = 100 :: Int
@@ -106,20 +109,20 @@ main = let readLine :: Text -> [Word8]
        in
        do
        -- Load training sequences
-       trainingInput <- parseFile "data/train-sample.csv"
+       trainingInput <- parseFile "data/train.csv"
        let trainingData = map (mkLabeledRecord . readLine) trainingInput
 
        -- Load testing sequences
-       testingInput <- parseFile "data/sample.csv"
+       testingInput <- parseFile "data/test.csv"
        let testingData = map (mkUnlabeledRecord . readLine) testingInput
 
        -- Classify
        let classifier = classify trainingData
-           labels      = map classifier testingData
+           labels      = map classifier testingData 
 
        -- Output result
        printf "Trainied using %d samples\n" (length trainingData)
-       out <- openFile "data/output-sample.csv" WriteMode     
+       out <- openFile "data/output.csv" WriteMode     
 
        -- Flush when the output has 100 bytes
        hSetBuffering out (BlockBuffering (Just 100))
