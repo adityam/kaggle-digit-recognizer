@@ -120,7 +120,7 @@ main = let readLine :: ByteString -> [Word8]
        let trainingData = map (mkLabeledRecord . readLine) trainingInput
 
        -- Load testing sequences
-       testingInput <- parseFile "data/sample.csv"
+       testingInput <- parseFile "data/test.csv"
        let testingData = map (mkUnlabeledRecord . readLine) testingInput
 
        -- Classify
@@ -132,7 +132,7 @@ main = let readLine :: ByteString -> [Word8]
        out <- openFile "data/output.csv" WriteMode     
 
        -- Flush when the output has 100 bytes
-       hSetBuffering out (BlockBuffering (Just 100))
+       hSetBuffering out (BlockBuffering (Just 200))
 
        sequence_ [ hPrint out l | l <- labels ]
        hClose out
