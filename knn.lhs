@@ -174,8 +174,8 @@ In addition to the choice of distance, there are two design choices in k-NN
 
 The final classification algorithm is pretty straight forward
 
-> classify :: [Record] -> Record -> Label
-> classify model p = fst . maximumBy (comparing snd) $! histogram
+> kNN :: [Record] -> Record -> Label
+> kNN model p = fst . maximumBy (comparing snd) $! histogram
 >   where
 >         histogram :: [(Label, Double)]
 >         histogram = map ( fst . head &&& numOfNeighbors ) -- Voting Algorithm
@@ -229,7 +229,7 @@ Main
 >        testingData  <- parseFile withoutLabels testingFile
 > 
 >        -- Classify
->        let classifier = classify trainingData
+>        let classifier = kNN trainingData
 >            labels     = map classifier testingData 
 > 
 >        -- Output result
