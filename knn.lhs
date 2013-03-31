@@ -48,7 +48,8 @@ Data Structures
 Labels
 ------
 
-> data Label = One
+> data Label = Zero
+>            | One
 >            | Two
 >            | Three
 >            | Four
@@ -61,6 +62,7 @@ Labels
 >            deriving (Eq, Ord)
 > 
 > instance Show Label where
+>       show Zero      = "0"
 >       show One       = "1"
 >       show Two       = "2"
 >       show Three     = "3"
@@ -77,6 +79,7 @@ Labels
 > 
 > toLabel :: Word8 -> Label
 > toLabel = go where
+>       go 0 = Zero      
 >       go 1 = One      
 >       go 2 = Two      
 >       go 3 = Three    
